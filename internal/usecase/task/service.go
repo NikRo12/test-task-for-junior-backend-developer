@@ -27,14 +27,22 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*taskdomain.Ta
 		return nil, err
 	}
 
+	now := s.now()
+
+	rec := normalized.Recurrence
+	if rec != nil && rec.Type == taskdomain.RecurrenceDaily && rec.StartDate == nil {
+		today := taskdomain.Date{Time: now.Truncate(24 * time.Hour)}
+		rec.StartDate = &today
+	}
+
 	model := &taskdomain.Task{
 		Title:       normalized.Title,
 		Description: normalized.Description,
 		Status:      normalized.Status,
+		Recurrence:  rec,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
-	now := s.now()
-	model.CreatedAt = now
-	model.UpdatedAt = now
 
 	created, err := s.repo.Create(ctx, model)
 	if err != nil {
@@ -62,11 +70,18 @@ func (s *Service) Update(ctx context.Context, id int64, input UpdateInput) (*tas
 		return nil, err
 	}
 
+	rec := normalized.Recurrence
+	if rec != nil && rec.Type == taskdomain.RecurrenceDaily && rec.StartDate == nil {
+		today := taskdomain.Date{Time: s.now().Truncate(24 * time.Hour)}
+		rec.StartDate = &today
+	}
+
 	model := &taskdomain.Task{
 		ID:          id,
 		Title:       normalized.Title,
 		Description: normalized.Description,
 		Status:      normalized.Status,
+		Recurrence:  rec,
 		UpdatedAt:   s.now(),
 	}
 
@@ -90,6 +105,22 @@ func (s *Service) List(ctx context.Context) ([]taskdomain.Task, error) {
 	return s.repo.List(ctx)
 }
 
+func (s *Service) ListByDate(ctx context.Context, date time.Time) ([]taskdomain.Task, error) {
+	all, err := s.repo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]taskdomain.Task, 0)
+	for _, t := range all {
+		if t.Recurrence != nil && t.Recurrence.IsScheduledFor(date) {
+			result = append(result, t)
+		}
+	}
+
+	return result, nil
+}
+
 func validateCreateInput(input CreateInput) (CreateInput, error) {
 	input.Title = strings.TrimSpace(input.Title)
 	input.Description = strings.TrimSpace(input.Description)
@@ -104,6 +135,10 @@ func validateCreateInput(input CreateInput) (CreateInput, error) {
 
 	if !input.Status.Valid() {
 		return CreateInput{}, fmt.Errorf("%w: invalid status", ErrInvalidInput)
+	}
+
+	if err := validateRecurrence(input.Recurrence); err != nil {
+		return CreateInput{}, err
 	}
 
 	return input, nil
@@ -121,5 +156,42 @@ func validateUpdateInput(input UpdateInput) (UpdateInput, error) {
 		return UpdateInput{}, fmt.Errorf("%w: invalid status", ErrInvalidInput)
 	}
 
+	if err := validateRecurrence(input.Recurrence); err != nil {
+		return UpdateInput{}, err
+	}
+
 	return input, nil
+}
+
+func validateRecurrence(r *taskdomain.Recurrence) error {
+	if r == nil {
+		return nil
+	}
+
+	switch r.Type {
+	case taskdomain.RecurrenceDaily:
+		if r.EveryNDays <= 0 {
+			return fmt.Errorf("%w: recurrence.every_n_days must be >= 1 for type 'daily'", ErrInvalidInput)
+		}
+
+	case taskdomain.RecurrenceMonthly:
+		if r.DayOfMonth < 1 || r.DayOfMonth > 30 {
+			return fmt.Errorf("%w: recurrence.day_of_month must be between 1 and 30", ErrInvalidInput)
+		}
+
+	case taskdomain.RecurrenceSpecificDates:
+		if len(r.Dates) == 0 {
+			return fmt.Errorf("%w: recurrence.dates must not be empty for type 'specific_dates'", ErrInvalidInput)
+		}
+
+	case taskdomain.RecurrenceEvenOdd:
+		if r.Parity != taskdomain.ParityEven && r.Parity != taskdomain.ParityOdd {
+			return fmt.Errorf("%w: recurrence.parity must be 'even' or 'odd'", ErrInvalidInput)
+		}
+
+	default:
+		return fmt.Errorf("%w: unknown recurrence type %q", ErrInvalidInput, r.Type)
+	}
+
+	return nil
 }

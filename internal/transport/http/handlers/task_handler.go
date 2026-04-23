@@ -3,8 +3,10 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 
@@ -31,6 +33,7 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Title:       req.Title,
 		Description: req.Description,
 		Status:      req.Status,
+		Recurrence:  dtoRecurrenceToDomain(req.Recurrence),
 	})
 	if err != nil {
 		writeUsecaseError(w, err)
@@ -73,6 +76,7 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Title:       req.Title,
 		Description: req.Description,
 		Status:      req.Status,
+		Recurrence:  dtoRecurrenceToDomain(req.Recurrence),
 	})
 	if err != nil {
 		writeUsecaseError(w, err)
@@ -110,6 +114,44 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, response)
+}
+
+// Schedule returns tasks whose recurrence rule matches the requested date.
+// The date is provided as a query parameter: ?date=YYYY-MM-DD.
+// If the date parameter is omitted, today's date (UTC) is used.
+func (h *TaskHandler) Schedule(w http.ResponseWriter, r *http.Request) {
+	date, err := parseDateParam(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	tasks, err := h.usecase.ListByDate(r.Context(), date)
+	if err != nil {
+		writeUsecaseError(w, err)
+		return
+	}
+
+	response := make([]taskDTO, 0, len(tasks))
+	for i := range tasks {
+		response = append(response, newTaskDTO(&tasks[i]))
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}
+
+func parseDateParam(r *http.Request) (time.Time, error) {
+	raw := r.URL.Query().Get("date")
+	if raw == "" {
+		return time.Now().UTC(), nil
+	}
+
+	t, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid date %q: expected YYYY-MM-DD", raw)
+	}
+
+	return t, nil
 }
 
 func getIDFromRequest(r *http.Request) (int64, error) {

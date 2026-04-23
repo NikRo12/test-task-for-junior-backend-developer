@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Task Service API",
-    "version": "1.0.0",
-    "description": "CRUD API for tasks built with clean architecture."
+    "version": "1.1.0",
+    "description": "CRUD API for tasks with recurrence scheduling support."
   },
   "servers": [
     {
@@ -20,7 +20,7 @@
     "/api/v1/tasks": {
       "get": {
         "tags": ["Tasks"],
-        "summary": "List tasks",
+        "summary": "List all tasks",
         "responses": {
           "200": {
             "description": "Task list",
@@ -42,7 +42,7 @@
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/CreateTaskRequest" }
+              "schema": { "$ref": "#/components/schemas/TaskMutationRequest" }
             }
           }
         },
@@ -52,6 +52,40 @@
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/Task" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      }
+    },
+    "/api/v1/tasks/schedule": {
+      "get": {
+        "tags": ["Tasks"],
+        "summary": "List tasks scheduled for a date",
+        "description": "Returns all recurring tasks whose recurrence rule matches the given date. If `date` is omitted, today's date (UTC) is used.",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "example": "2024-01-15"
+            },
+            "description": "Calendar date in YYYY-MM-DD format. Defaults to today (UTC)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tasks scheduled for the given date",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Task" }
+                }
               }
             }
           },
@@ -98,7 +132,7 @@
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/UpdateTaskRequest" }
+              "schema": { "$ref": "#/components/schemas/TaskMutationRequest" }
             }
           }
         },
@@ -153,41 +187,70 @@
       }
     },
     "schemas": {
-      "CreateTaskRequest": {
+      "Recurrence": {
+        "type": "object",
+        "required": ["type"],
+        "discriminator": {
+          "propertyName": "type"
+        },
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["daily", "monthly", "specific_dates", "even_odd"],
+            "description": "Recurrence pattern type"
+          },
+          "every_n_days": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Required for type=daily. Repeat every N days."
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "description": "Optional for type=daily. Start date in YYYY-MM-DD. Defaults to task creation date."
+          },
+          "day_of_month": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30,
+            "description": "Required for type=monthly. Day of month (1–30) on which the task recurs."
+          },
+          "dates": {
+            "type": "array",
+            "items": { "type": "string", "format": "date" },
+            "description": "Required for type=specific_dates. List of YYYY-MM-DD dates."
+          },
+          "parity": {
+            "type": "string",
+            "enum": ["even", "odd"],
+            "description": "Required for type=even_odd. Recur on even or odd days of the month."
+          }
+        },
+        "example": {
+          "type": "daily",
+          "every_n_days": 2,
+          "start_date": "2024-01-01"
+        }
+      },
+      "TaskMutationRequest": {
         "type": "object",
         "required": ["title"],
         "properties": {
           "title": {
             "type": "string",
-            "example": "Prepare release"
+            "example": "Patient rounds"
           },
           "description": {
             "type": "string",
-            "example": "Collect release notes and check migrations"
+            "example": "Daily ward rounds for ward 3"
           },
           "status": {
             "type": "string",
             "enum": ["new", "in_progress", "done"],
             "example": "new"
-          }
-        }
-      },
-      "UpdateTaskRequest": {
-        "type": "object",
-        "required": ["title", "status"],
-        "properties": {
-          "title": {
-            "type": "string",
-            "example": "Prepare release"
           },
-          "description": {
-            "type": "string",
-            "example": "Collect release notes and check migrations"
-          },
-          "status": {
-            "type": "string",
-            "enum": ["new", "in_progress", "done"],
-            "example": "in_progress"
+          "recurrence": {
+            "$ref": "#/components/schemas/Recurrence"
           }
         }
       },
@@ -195,25 +258,28 @@
         "type": "object",
         "properties": {
           "id": { "type": "integer", "format": "int64", "example": 1 },
-          "title": { "type": "string", "example": "Prepare release" },
+          "title": { "type": "string", "example": "Patient rounds" },
           "description": {
             "type": "string",
-            "example": "Collect release notes and check migrations"
+            "example": "Daily ward rounds for ward 3"
           },
           "status": {
             "type": "string",
             "enum": ["new", "in_progress", "done"],
             "example": "new"
           },
+          "recurrence": {
+            "$ref": "#/components/schemas/Recurrence"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
-            "example": "2026-03-24T00:00:00Z"
+            "example": "2024-01-01T00:00:00Z"
           },
           "updated_at": {
             "type": "string",
             "format": "date-time",
-            "example": "2026-03-24T00:00:00Z"
+            "example": "2024-01-01T00:00:00Z"
           }
         }
       },
